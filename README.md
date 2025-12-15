@@ -1,5 +1,7 @@
 # Oryx Programming Language
 
+<img width="104" height="112" alt="image(7)" src="https://github.com/user-attachments/assets/c18679a2-841d-4341-a630-0a903407e25a" />
+
 An interpreted programming language designed for **unprecedented portability and effortless embedding**. Oryx is built to be a more flexible and modern alternative to languages like Lua.
 
 ## Table of Contents
