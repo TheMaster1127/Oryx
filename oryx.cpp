@@ -1403,8 +1403,15 @@ std::string Oryx_VM(std::string code) {
     return outState;
 }
 // end of oryxir.htvm
+std::string Oryx_Lang(std::string code) {
+    std::string status = "";
+    status = Oryx_VM(Trim(code));
+    return status;
+}
 int main(int argc, char* argv[]) {
-    print(Oryx_VM("mov r1, 5\ncall print"));
+    std::string status = "";
+    status = Oryx_Lang("mov r1, 5\ncall print");
+    print(status);
     
 
     return 0;

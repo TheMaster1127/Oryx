@@ -293,10 +293,6 @@ int RegExMatch(std::string_view haystack, std::string_view needle) {
     return 0; // Return 0 on failure
 }
 
-std::string HTVM_getLang_HTVM() {
-    return "cpp";
-}
-
 void HTVM_Append(std::vector<std::string>& arr, const std::string& value) {
     arr.push_back(value);
 }
@@ -1404,24 +1400,4 @@ std::string Oryx_VM(std::string code) {
     code = handleComments(code, ";");
     outState = Oryx_interpreter(Trim(code));
     return outState;
-}
-int main(int argc, char* argv[]) {
-    std::string code = "";
-    std::string params = "";
-    std::string outState = "";
-    if (HTVM_getLang_HTVM() == "js" || HTVM_getLang_HTVM() == "ts") {
-        code = "\nstring var1: \"hello\"\nstring var2: \"hello\"\n\ncmp \"hello\", \"hello\" \nje iter_end\nmov r1, 6\ncall print\niter_end:\nmov r1, 5\ncall print              ; prints the complete greeting\n";
-        outState = Oryx_VM(code);
-        print(outState);
-    } else {
-        params = getLangParams("oryxir", "oryxir");
-        if (params != "") {
-            code = FileRead(params);
-            outState = Oryx_VM(code);
-            print(outState);
-        }
-    }
-    
-
-    return 0;
 }

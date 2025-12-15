@@ -132,10 +132,6 @@ function Trim(inputString: string): string {
     return inputString.trim();
 }
 
-function HTVM_getLang_HTVM(): string {
-    return "ts";
-}
-
 function isWindows(): boolean {
     // This check is for Node.js environment. It will be false in browsers.
     if (typeof process !== 'undefined' && process.platform) {
@@ -1236,23 +1232,3 @@ function Oryx_VM(code: string): string {
     outState = Oryx_interpreter(Trim(code));
     return outState;
 }
-async function main(): Promise<void> {
-    var code: string = "";
-    var params: string = "";
-    var outState: string = "";
-    if (HTVM_getLang_HTVM() == "js" || HTVM_getLang_HTVM() == "ts") {
-        code = "\nstring var1: \"hello\"\nstring var2: \"hello\"\n\ncmp \"hello\", \"hello\" \nje iter_end\nmov r1, 6\ncall print\niter_end:\nmov r1, 5\ncall print              ; prints the complete greeting\n";
-        outState = Oryx_VM(code);
-        print(outState);
-    } else {
-        params = getLangParams("oryxir", "oryxir");
-        if (params != "") {
-            code = FileRead(params);
-            outState = Oryx_VM(code);
-            print(outState);
-        }
-    }
-    
-
-}
-main();

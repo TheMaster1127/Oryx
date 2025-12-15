@@ -156,6 +156,7 @@ def HTVM_Remove(arr, index):
 
 
 
+# start of oryxir.htvm
 # start of HT-Lib.htvm
 # global vars NEEDED
 HT_LIB_theIdNumOfThe34 = 0
@@ -974,3 +975,11 @@ def Oryx_VM(code):
     code = handleComments(code, ";")
     outState = Oryx_interpreter(Trim(code))
     return outState
+# end of oryxir.htvm
+def Oryx_Lang(code):
+    status = ""
+    status = Oryx_VM(Trim(code))
+    return status
+status = ""
+status = Oryx_Lang("mov r1, 5\ncall print")
+print(status)
