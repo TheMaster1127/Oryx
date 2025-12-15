@@ -773,8 +773,9 @@ func str Oryx_VM(str code) {
     str outState := ""
     code := Trim(code)
     code := cleanUpFirst(code)
-    code := handleComments(code, "#")
+    code := preserveStrings(code)
     code := handleComments(code, ";")
+    code := restoreStrings(code)
     outState := Oryx_interpreter(Trim(code))
     
     return outState

@@ -1181,15 +1181,27 @@ function Oryx_VM(code) {
     var outState = "";
     code = Trim(code);
     code = cleanUpFirst(code);
-    code = handleComments(code, "#");
+    code = preserveStrings(code);
     code = handleComments(code, ";");
+    code = restoreStrings(code);
     outState = Oryx_interpreter(Trim(code));
     return outState;
 }
 // end of oryxir.htvm
 function Oryx_Lang(code) {
     var status = "";
-    status = Oryx_VM(Trim(code));
+    var outCode = "";
+    code = cleanUpFirst(code);
+    code = preserveStrings(code);
+    code = handleComments(code, ";");
+    code = Trim(restoreStrings(code));
+    // main loop
+    let items48 = LoopParseFunc(code, "\n", "\r");
+    for (let A_Index48 = 0; A_Index48 < items48.length; A_Index48++) {
+        const A_LoopField48 = items48[A_Index48 - 0];
+        outCode += A_LoopField48 + Chr(10);
+    }
+    status = Oryx_VM(Trim(outCode));
     return status;
 }
 async function main() {

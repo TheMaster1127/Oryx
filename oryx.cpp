@@ -1397,15 +1397,27 @@ std::string Oryx_VM(std::string code) {
     std::string outState = "";
     code = Trim(code);
     code = cleanUpFirst(code);
-    code = handleComments(code, "#");
+    code = preserveStrings(code);
     code = handleComments(code, ";");
+    code = restoreStrings(code);
     outState = Oryx_interpreter(Trim(code));
     return outState;
 }
 // end of oryxir.htvm
 std::string Oryx_Lang(std::string code) {
     std::string status = "";
-    status = Oryx_VM(Trim(code));
+    std::string outCode = "";
+    code = cleanUpFirst(code);
+    code = preserveStrings(code);
+    code = handleComments(code, ";");
+    code = Trim(restoreStrings(code));
+    // main loop
+    std::vector<std::string> items48 = LoopParseFunc(code, "\n", "\r");
+    for (size_t A_Index48 = 0; A_Index48 < items48.size(); A_Index48++) {
+        std::string A_LoopField48 = items48[A_Index48 - 0];
+        outCode += A_LoopField48 + Chr(10);
+    }
+    status = Oryx_VM(Trim(outCode));
     return status;
 }
 int main(int argc, char* argv[]) {

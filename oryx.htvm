@@ -2,8 +2,20 @@ include "oryxir.htvm"
 
 func str Oryx_Lang(str code) {
 str status := ""
+str outCode := ""
 
-status := Oryx_VM(Trim(code))
+code := cleanUpFirst(code)
+code := preserveStrings(code)
+code := handleComments(code, ";")
+code := Trim(restoreStrings(code))
+
+; main loop
+Loop, Parse, code, `n, `r {
+outCode .= A_LoopField . Chr(10)
+}
+
+
+status := Oryx_VM(Trim(outCode))
 
 return status
 }
