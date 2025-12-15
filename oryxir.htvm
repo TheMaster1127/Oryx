@@ -1,0 +1,822 @@
+include "HT-Lib.htvm"
+
+arr str Official_Oryx_VM_symbol_table
+arr str Official_Oryx_VM_reg_array
+
+; --- API STATE CACHE ---
+; These globals store the state of the *last* completed interpreter run.
+arr str Official_Oryx_VM_API_symbol_table_cache
+
+; --- HELPER: SAFE TOKEN GETTER ---
+; Replaces StrSplit(str, delim, index) to avoid crashes on missing parts.
+func str get_token(str input, str delim, int index) {
+    int current := 1
+    Loop, Parse, input, delim {
+        if (current = index) {
+            return A_LoopField
+        }
+        current++
+    }
+    return ""
+}
+
+; --- HELPER FUNCTION: GET VALUE ---
+func str get_value(str operand) {
+    if (RegExMatch(operand, "^r\d+$")) {
+        int reg_index := INT(StringTrimLeft(operand, 1))
+        return Official_Oryx_VM_reg_array[reg_index]
+    } 
+    else if (RegExMatch(operand, "^-?\d+(\.\d+)?$")) {
+        return operand
+    }
+    else if (SubStr(operand, 1, 1) = Chr(34)) { 
+        str val := StringTrimLeft(operand, 1)
+        val := StringTrimRight(val, 1)
+        val := StrReplace(val, "\n", Chr(10))
+        val := StrReplace(val, "\r", Chr(13))
+        val := StrReplace(val, "\t", Chr(9))
+        return val
+    }
+    else {
+        int i := 0
+        Loop, Official_Oryx_VM_symbol_table.size() {
+            str entry := Official_Oryx_VM_symbol_table[i]
+            if (get_token(entry, Chr(254), 1) = operand) {
+                return get_token(entry, Chr(254), 3)
+            }
+            i++
+        }
+    }
+    return ""
+}
+
+; --- HELPER FUNCTION: SET VALUE ---
+func void set_value(str dest_operand, str new_value) {
+    if (RegExMatch(dest_operand, "^r\d+$")) {
+        int reg_index := INT(StringTrimLeft(dest_operand, 1))
+        Official_Oryx_VM_reg_array[reg_index] := new_value
+    } else {
+        int i := 0
+        Loop, Official_Oryx_VM_symbol_table.size() {
+            str entry := Official_Oryx_VM_symbol_table[i]
+            str var_name := get_token(entry, Chr(254), 1)
+            if (var_name = dest_operand) {
+                str var_type := get_token(entry, Chr(254), 2)
+                Official_Oryx_VM_symbol_table[i] := var_name . Chr(254) . var_type . Chr(254) . new_value
+                return
+            }
+            i++
+        }
+    }
+}
+
+
+
+; --- NEW API FUNCTION: GET VARIABLE ---
+; Retrieves the final value of a variable from the last interpreter run.
+; @param str var_name The name of the variable (e.g., "my_var").
+; @return str The final value of the variable as a string. Returns "" if not found.
+func str OryxAPI_GetVariable(str operand) {
+    if (RegExMatch(operand, "^r\d+$")) {
+        int reg_index := INT(StringTrimLeft(operand, 1))
+        return Official_Oryx_VM_reg_array[reg_index]
+    } 
+    else if (RegExMatch(operand, "^-?\d+(\.\d+)?$")) {
+        return operand
+    }
+    else if (SubStr(operand, 1, 1) = Chr(34)) { 
+        str val := StringTrimLeft(operand, 1)
+        val := StringTrimRight(val, 1)
+        val := StrReplace(val, "\n", Chr(10))
+        val := StrReplace(val, "\r", Chr(13))
+        val := StrReplace(val, "\t", Chr(9))
+        return val
+    }
+    else {
+        int i := 0
+        Loop, Official_Oryx_VM_symbol_table.size() {
+            str entry := Official_Oryx_VM_symbol_table[i]
+            if (get_token(entry, Chr(254), 1) = operand) {
+                return get_token(entry, Chr(254), 3)
+            }
+            i++
+        }
+    }
+    return ""
+}
+
+; --- NEW API FUNCTION: GET ARRAY ---
+; Retrieves the final contents of an array from the last interpreter run.
+; @param str arr_name The name of the array (e.g., "my_list").
+; @return arr str An array containing all the elements. Returns an empty array if not found.
+func arr str OryxAPI_GetArray(str arr_name) {
+    arr str result_array
+    str content_string := ""
+
+    int i := 0
+    Loop, Official_Oryx_VM_API_symbol_table_cache.size() {
+        str entry := Official_Oryx_VM_API_symbol_table_cache[i]
+        ; Check if it's an array and the name matches
+        if (get_token(entry, Chr(254), 1) = arr_name and get_token(entry, Chr(254), 2) = "arr") {
+            content_string := get_token(entry, Chr(254), 3)
+            break
+        }
+        i++
+    }
+
+    if (content_string != "") {
+        Loop, Parse, content_string, Chr(253) {
+            result_array.add(A_LoopField)
+        }
+    }
+    return result_array
+}
+
+
+func str Oryx_interpreter(str code) {
+    str outState := "success"
+    
+    str str1 := ""
+    str str2 := ""
+    str str3 := ""
+    str str4 := "" 
+    str ALoopField := ""
+    str current_line := "" 
+     
+    arr str all_instr 
+    
+    arr str label_table
+    int zero_flag := 0
+    int sign_flag := 0
+
+    arr int call_stack
+    arr str main_stack 
+    
+    Loop, 100 { Official_Oryx_VM_reg_array.add("") }
+    Loop, Parse, code, `n, `r { all_instr.add(A_LoopField) }
+
+    int i := 0
+    Loop, all_instr.size() {
+        ALoopField := Trim(all_instr[i]) 
+        if (SubStr(ALoopField, -1) = ":") {
+            str label_name := StringTrimRight(ALoopField, 1)
+            label_table.add(label_name . Chr(254) . STR(i))
+        }
+        i++
+    }
+
+    int pc := 0
+    Loop {
+        if (pc >= all_instr.size()) { break }
+
+        current_line := Trim(all_instr[pc])
+
+        bool pc_was_modified := false
+
+        if (current_line = "" or SubStr(current_line, -1) = ":") { 
+            pc++
+            continue 
+        }
+    
+        if (SubStr(current_line, 1, 7) = "string ") {
+            str1 := StringTrimLeft(current_line, 7)
+            int first_colon := InStr(str1, ":")
+            str2 := Trim(SubStr(str1, 1, first_colon - 1))
+            str3 := Trim(SubStr(str1, first_colon + 1))
+            str3 := StringTrimLeft(str3, 1)
+            str3 := StringTrimRight(str3, 1)
+            str3 := StrReplace(str3, "\n", Chr(10))
+            str3 := StrReplace(str3, "\r", Chr(13))
+            str3 := StrReplace(str3, "\t", Chr(9))
+            Official_Oryx_VM_symbol_table.add(str2 . Chr(254) . "string" . Chr(254) . str3)
+        }
+        
+        if (SubStr(current_line, 1, 4) = "int ") {
+            str1 := StringTrimLeft(current_line, 4)
+            int first_colon := InStr(str1, ":")
+            str2 := Trim(SubStr(str1, 1, first_colon - 1))
+            str3 := Trim(SubStr(str1, first_colon + 1))
+            Official_Oryx_VM_symbol_table.add(str2 . Chr(254) . "int" . Chr(254) . str3)
+        }
+
+        if (SubStr(current_line, 1, 6) = "float ") {
+            str1 := StringTrimLeft(current_line, 6)
+            int first_colon := InStr(str1, ":")
+            str2 := Trim(SubStr(str1, 1, first_colon - 1))
+            str3 := Trim(SubStr(str1, first_colon + 1))
+            Official_Oryx_VM_symbol_table.add(str2 . Chr(254) . "float" . Chr(254) . str3)
+        }
+
+        if (SubStr(current_line, 1, 4) = "arr ") {
+            str1 := StringTrimLeft(current_line, 4)
+            Official_Oryx_VM_symbol_table.add(str1 . Chr(254) . "arr" . Chr(254) . "") 
+        }
+        
+if (SubStr(current_line, 1, 4) = "mov ") {
+            str1 := StringTrimLeft(current_line, 4)
+            str op1 := ""
+            str op2 := ""
+
+            ; --- FIX: Manually parse to respect commas in string literals ---
+            int first_comma := InStr(str1, ",")
+            if (first_comma > 0) {
+                op1 := Trim(SubStr(str1, 1, first_comma - 1))
+                op2 := Trim(SubStr(str1, first_comma + 1))
+            } else {
+                ; This would be a syntax error, but we'll handle it gracefully
+                op1 := Trim(str1)
+            }
+            ; --- END FIX ---
+            
+            if (op2 != "") {
+                str value_to_move := get_value(op2)
+                set_value(op1, value_to_move)
+            }
+        }
+        
+        if (SubStr(current_line, 1, 4) = "add ") {
+            str1 := StringTrimLeft(current_line, 4)
+            str op1 := Trim(get_token(str1, ",", 1))
+            str op2 := Trim(get_token(str1, ",", 2))
+            float val1 := FLOAT(get_value(op1))
+            float val2 := FLOAT(get_value(op2))
+            set_value(op1, STR(val1 + val2))
+        }
+        
+        if (SubStr(current_line, 1, 4) = "sub ") {
+            str1 := StringTrimLeft(current_line, 4)
+            str op1 := Trim(get_token(str1, ",", 1))
+            str op2 := Trim(get_token(str1, ",", 2))
+            float val1 := FLOAT(get_value(op1))
+            float val2 := FLOAT(get_value(op2))
+            set_value(op1, STR(val1 - val2))
+        }
+
+        if (SubStr(current_line, 1, 4) = "mul ") {
+            str1 := StringTrimLeft(current_line, 4)
+            str op1 := Trim(get_token(str1, ",", 1))
+            str op2 := Trim(get_token(str1, ",", 2))
+            float val1 := FLOAT(get_value(op1))
+            float val2 := FLOAT(get_value(op2))
+            set_value(op1, STR(val1 * val2))
+        }
+        
+        if (SubStr(current_line, 1, 4) = "div ") {
+            str1 := StringTrimLeft(current_line, 4)
+            str op1 := Trim(get_token(str1, ",", 1))
+            str op2 := Trim(get_token(str1, ",", 2))
+            float val1 := FLOAT(get_value(op1))
+            float val2 := FLOAT(get_value(op2))
+            set_value(op1, STR(val1 / val2))
+        }
+
+if (SubStr(current_line, 1, 8) = "add_str ") {
+            str1 := StringTrimLeft(current_line, 8)
+            str op1 := ""
+            str op2 := ""
+
+            ; --- FIX: Manually parse to respect commas in string literals ---
+            int first_comma := InStr(str1, ",")
+            if (first_comma > 0) {
+                op1 := Trim(SubStr(str1, 1, first_comma - 1))
+                op2 := Trim(SubStr(str1, first_comma + 1))
+            } else {
+                op1 := Trim(str1)
+            }
+            ; --- END FIX ---
+            
+            if (op2 != "") {
+                str s1 := get_value(op1)
+                str s2 := get_value(op2)
+                set_value(op1, s1 . s2)
+            }
+        }
+
+        if (SubStr(current_line, 1, 4) = "inc ") {
+            str op1 := Trim(StringTrimLeft(current_line, 4))
+            float val := FLOAT(get_value(op1))
+            set_value(op1, STR(val + 1))
+        }
+
+        if (SubStr(current_line, 1, 4) = "dec ") {
+            str op1 := Trim(StringTrimLeft(current_line, 4))
+            float val := FLOAT(get_value(op1))
+            set_value(op1, STR(val - 1))
+        }
+
+        if (SubStr(current_line, 1, 4) = "cmp ") {
+            str1 := StringTrimLeft(current_line, 4)
+            str op1_str := ""
+            str op2_str := ""
+            
+            ; --- FIX: Use manual parsing to handle potential commas in string literals ---
+            int first_comma := InStr(str1, ",")
+            if (first_comma > 0) {
+                op1_str := Trim(SubStr(str1, 1, first_comma - 1))
+                op2_str := Trim(SubStr(str1, first_comma + 1))
+            } else {
+                 ; This would be a syntax error, but we'll handle it gracefully
+                op1_str := Trim(str1)
+            }
+
+            str s_val1 := get_value(op1_str)
+            str s_val2 := get_value(op2_str)
+
+            ; --- FIX: Check if we are comparing numbers or strings ---
+            if (RegExMatch(s_val1, "^-?\d+(\.\d+)?$") and RegExMatch(s_val2, "^-?\d+(\.\d+)?$")) {
+                ; --- Numeric Comparison ---
+                float val1 := FLOAT(s_val1)
+                float val2 := FLOAT(s_val2)
+                if (val1 = val2) { zero_flag := 1 } else { zero_flag := 0 }
+                if (val1 < val2) { sign_flag := 1 } else { sign_flag := 0 }
+            } else {
+                ; --- String Comparison ---
+                if (s_val1 = s_val2) { zero_flag := 1 } else { zero_flag := 0 }
+                if (s_val1 < s_val2) { sign_flag := 1 } else { sign_flag := 0 } ; Lexicographical compare
+            }
+        }
+
+        if (SubStr(current_line, 1, 4) = "jmp ") {
+            pc_was_modified := true
+            str label_name := Trim(StringTrimLeft(current_line, 4))
+            int j := 0
+            Loop, label_table.size() {
+                if (get_token(label_table[j], Chr(254), 1) = label_name) {
+                    pc := INT(get_token(label_table[j], Chr(254), 2))
+                    break
+                }
+                j++
+            }
+        }
+        
+        if (SubStr(current_line, 1, 3) = "je ") {
+            if (zero_flag = 1) {
+                pc_was_modified := true
+                str label_name := Trim(StringTrimLeft(current_line, 3))
+                int j := 0
+                Loop, label_table.size() {
+                    if (get_token(label_table[j], Chr(254), 1) = label_name) {
+                        pc := INT(get_token(label_table[j], Chr(254), 2))
+                        break
+                    }
+                    j++
+                }
+            }
+        }
+
+        if (SubStr(current_line, 1, 4) = "jne ") {
+            if (zero_flag = 0) {
+                pc_was_modified := true
+                str label_name := Trim(StringTrimLeft(current_line, 4))
+                int j := 0
+                Loop, label_table.size() {
+                    if (get_token(label_table[j], Chr(254), 1) = label_name) {
+                        pc := INT(get_token(label_table[j], Chr(254), 2))
+                        break
+                    }
+                    j++
+                }
+            }
+        }
+        
+        if (SubStr(current_line, 1, 3) = "jg ") {
+            if (sign_flag = 0 and zero_flag = 0) {
+                pc_was_modified := true
+                str label_name := Trim(StringTrimLeft(current_line, 3))
+                int j := 0
+                Loop, label_table.size() {
+                    if (get_token(label_table[j], Chr(254), 1) = label_name) {
+                        pc := INT(get_token(label_table[j], Chr(254), 2))
+                        break
+                    }
+                    j++
+                }
+            }
+        }
+        
+        if (SubStr(current_line, 1, 3) = "jl ") {
+            if (sign_flag = 1) {
+                pc_was_modified := true
+                str label_name := Trim(StringTrimLeft(current_line, 3))
+                int j := 0
+                Loop, label_table.size() {
+                    if (get_token(label_table[j], Chr(254), 1) = label_name) {
+                        pc := INT(get_token(label_table[j], Chr(254), 2))
+                        break
+                    }
+                    j++
+                }
+            }
+        }
+
+        if (SubStr(current_line, 1, 4) = "jge ") {
+            if (sign_flag = 0) {
+                pc_was_modified := true
+                str label_name := Trim(StringTrimLeft(current_line, 4))
+                int j := 0
+                Loop, label_table.size() {
+                    if (get_token(label_table[j], Chr(254), 1) = label_name) {
+                        pc := INT(get_token(label_table[j], Chr(254), 2))
+                        break
+                    }
+                    j++
+                }
+            }
+        }
+
+        if (SubStr(current_line, 1, 4) = "jle ") {
+            if (sign_flag = 1 or zero_flag = 1) {
+                pc_was_modified := true
+                str label_name := Trim(StringTrimLeft(current_line, 4))
+                int j := 0
+                Loop, label_table.size() {
+                    if (get_token(label_table[j], Chr(254), 1) = label_name) {
+                        pc := INT(get_token(label_table[j], Chr(254), 2))
+                        break
+                    }
+                    j++
+                }
+            }
+        }
+        
+        if (SubStr(current_line, 1, 6) = "input ") {
+            str1 := StringTrimLeft(current_line, 6)
+            str dest := ""
+            str prompt_source := ""
+
+            int first_comma := InStr(str1, ",")
+            if (first_comma > 0) {
+                dest := Trim(SubStr(str1, 1, first_comma - 1))
+                prompt_source := Trim(SubStr(str1, first_comma + 1))
+            } else {
+                dest := Trim(str1)
+            }
+            
+            str prompt_msg := get_value(prompt_source)
+            str user_input := input(prompt_msg)
+            set_value(dest, user_input)
+        }
+        
+        if (SubStr(current_line, 1, 10) = "file.read ") {
+            str1 := StringTrimLeft(current_line, 10)
+            str dest := ""
+            str path_source := ""
+
+            int first_comma := InStr(str1, ",")
+            if (first_comma > 0) {
+                dest := Trim(SubStr(str1, 1, first_comma - 1))
+                path_source := Trim(SubStr(str1, first_comma + 1))
+            } else {
+                dest := Trim(str1)
+            }
+            
+            str filepath := get_value(path_source)
+            str content := FileRead(filepath)
+            set_value(dest, content)
+        }
+
+        if (SubStr(current_line, 1, 12) = "file.append ") {
+            str1 := StringTrimLeft(current_line, 12)
+            str path_source := ""
+            str content_source := ""
+            
+            int first_comma := InStr(str1, ",")
+            if (first_comma > 0) {
+                path_source := Trim(SubStr(str1, 1, first_comma - 1))
+                content_source := Trim(SubStr(str1, first_comma + 1))
+            } else {
+                path_source := Trim(str1)
+            }
+
+            str filepath := get_value(path_source)
+            str content := get_value(content_source)
+            FileAppend(content, filepath)
+        }
+
+        if (SubStr(current_line, 1, 12) = "file.delete ") {
+            str1 := StringTrimLeft(current_line, 12)
+            str path_source := Trim(str1)
+            
+            str filepath := get_value(path_source)
+            
+            FileDelete(filepath)
+        }
+        
+        if (SubStr(current_line, 1, 5) = "call ") {
+            str1 := Trim(StringTrimLeft(current_line, 5))
+            if (str1 = "print") {
+                str2 := Official_Oryx_VM_reg_array[1]
+                print(str2)
+            } else {
+                pc_was_modified := true
+                call_stack.add(pc + 1)
+                str label_name := str1
+                int j := 0
+                Loop, label_table.size() {
+                    if (get_token(label_table[j], Chr(254), 1) = label_name) {
+                        pc := INT(get_token(label_table[j], Chr(254), 2))
+                        break
+                    }
+                    j++
+                }
+            }
+        }
+        
+        if (current_line = "ret") {
+            if (call_stack.size() = 0) {
+                print("FATAL ERROR: Return ('ret') called with empty call stack! PC: " . STR(pc))
+                break
+            }
+            pc_was_modified := true
+            int return_address := call_stack[call_stack.size() - 1]
+            call_stack.pop()
+            pc := return_address
+        }
+
+        if (SubStr(current_line, 1, 5) = "push ") {
+            str op1 := Trim(StringTrimLeft(current_line, 5)) 
+            str val := get_value(op1)
+            main_stack.add(op1 . Chr(254) . val)
+        }
+
+        if (SubStr(current_line, 1, 4) = "pop ") {
+            str op1 := Trim(StringTrimLeft(current_line, 4))
+            str target_prefix := op1 . Chr(254)
+            int found_index := -1
+            str found_val := ""
+            int stack_idx := main_stack.size() - 1
+            Loop {
+                if (stack_idx < 0) { break }
+                str entry := main_stack[stack_idx]
+                if (SubStr(entry, 1, StrLen(target_prefix)) = target_prefix) {
+                    found_index := stack_idx
+                    found_val := StringTrimLeft(entry, StrLen(target_prefix))
+                    break
+                }
+                stack_idx--
+            }
+            if (found_index != -1) {
+                int reg_idx := INT(StringTrimLeft(op1, 1))
+                Official_Oryx_VM_reg_array[reg_idx] := found_val
+                main_stack.rm(found_index)
+            }
+        }
+
+        if (SubStr(current_line, 1, 8) = "arr.add ") {
+            str1 := StringTrimLeft(current_line, 8)
+            str arr_name := Trim(get_token(str1, ",", 1))
+            str val_source := Trim(get_token(str1, ",", 2))
+            str val := get_value(val_source)
+
+            int j := 0
+            Loop, Official_Oryx_VM_symbol_table.size() {
+                str entry := Official_Oryx_VM_symbol_table[j]
+                if (get_token(entry, Chr(254), 1) = arr_name) {
+                    str current_content := get_token(entry, Chr(254), 3)
+                    if (current_content = "") {
+                        current_content := val
+                    } else {
+                        current_content := current_content . Chr(253) . val
+                    }
+                    Official_Oryx_VM_symbol_table[j] := arr_name . Chr(254) . "arr" . Chr(254) . current_content
+                    break
+                }
+                j++
+            }
+        }
+
+        if (SubStr(current_line, 1, 8) = "arr.get ") {
+            str1 := StringTrimLeft(current_line, 8)
+            str arr_name := Trim(get_token(str1, ",", 1))
+            str index_source := Trim(get_token(str1, ",", 2))
+            str dest_reg_str := Trim(get_token(str1, ",", 3))
+            
+            int index := INT(get_value(index_source))
+            
+            int j := 0
+            Loop, Official_Oryx_VM_symbol_table.size() {
+                str entry := Official_Oryx_VM_symbol_table[j]
+                if (get_token(entry, Chr(254), 1) = arr_name) {
+                    str content := get_token(entry, Chr(254), 3)
+                    str val := get_token(content, Chr(253), index + 1)
+                    int reg_idx := INT(StringTrimLeft(dest_reg_str, 1))
+                    Official_Oryx_VM_reg_array[reg_idx] := val
+                    break
+                }
+                j++
+            }
+        }
+
+        if (SubStr(current_line, 1, 8) = "arr.set ") {
+            str1 := StringTrimLeft(current_line, 8)
+            str arr_name := Trim(get_token(str1, ",", 1))
+            str index_source := Trim(get_token(str1, ",", 2))
+            str val_source := Trim(get_token(str1, ",", 3))
+            
+            int index := INT(get_value(index_source))
+            str new_val := get_value(val_source)
+
+            int j := 0
+            Loop, Official_Oryx_VM_symbol_table.size() {
+                str entry := Official_Oryx_VM_symbol_table[j]
+                if (get_token(entry, Chr(254), 1) = arr_name) {
+                    str content := get_token(entry, Chr(254), 3)
+                    str new_content := ""
+                    int current_idx := 0
+                    Loop, Parse, content, Chr(253) {
+                        if (current_idx = index) {
+                            if (new_content != "") { new_content := new_content . Chr(253) }
+                            new_content := new_content . new_val
+                        } else {
+                            if (new_content != "") { new_content := new_content . Chr(253) }
+                            new_content := new_content . A_LoopField
+                        }
+                        current_idx++
+                    }
+                    Official_Oryx_VM_symbol_table[j] := arr_name . Chr(254) . "arr" . Chr(254) . new_content
+                    break
+                }
+                j++
+            }
+        }
+
+        if (SubStr(current_line, 1, 9) = "arr.size ") {
+            str1 := StringTrimLeft(current_line, 9)
+            str arr_name := Trim(get_token(str1, ",", 1))
+            str dest_reg_str := Trim(get_token(str1, ",", 2))
+
+            int j := 0
+            Loop, Official_Oryx_VM_symbol_table.size() {
+                str entry := Official_Oryx_VM_symbol_table[j]
+                if (get_token(entry, Chr(254), 1) = arr_name) {
+                    str content := get_token(entry, Chr(254), 3)
+                    int size := 0
+                    if (content != "") {
+                        int current_idx := 0
+                        Loop, Parse, content, Chr(253) {
+                            current_idx++
+                        }
+                        size := current_idx
+                    }
+                    int reg_idx := INT(StringTrimLeft(dest_reg_str, 1))
+                    Official_Oryx_VM_reg_array[reg_idx] := STR(size)
+                    break
+                }
+                j++
+            }
+        }
+
+        if (SubStr(current_line, 1, 10) = "arr.clear ") {
+            str arr_name := Trim(StringTrimLeft(current_line, 10))
+            int j := 0
+            Loop, Official_Oryx_VM_symbol_table.size() {
+                str entry := Official_Oryx_VM_symbol_table[j]
+                if (get_token(entry, Chr(254), 1) = arr_name) {
+                    Official_Oryx_VM_symbol_table[j] := arr_name . Chr(254) . "arr" . Chr(254) . ""
+                    break
+                }
+                j++
+            }
+        }
+
+        if (SubStr(current_line, 1, 9) = "arr.copy ") {
+            str1 := StringTrimLeft(current_line, 9)
+            str src_name := Trim(get_token(str1, ",", 1))
+            str dest_name := Trim(get_token(str1, ",", 2))
+            str content_to_copy := ""
+
+            int j := 0
+            Loop, Official_Oryx_VM_symbol_table.size() {
+                str entry := Official_Oryx_VM_symbol_table[j]
+                if (get_token(entry, Chr(254), 1) = src_name) {
+                    content_to_copy := get_token(entry, Chr(254), 3)
+                    break
+                }
+                j++
+            }
+
+            j := 0
+            Loop, Official_Oryx_VM_symbol_table.size() {
+                str entry := Official_Oryx_VM_symbol_table[j]
+                if (get_token(entry, Chr(254), 1) = dest_name) {
+                    Official_Oryx_VM_symbol_table[j] := dest_name . Chr(254) . "arr" . Chr(254) . content_to_copy
+                    break
+                }
+                j++
+            }
+        }
+        
+        ; --- NEW: String Manipulation ---
+
+       if (SubStr(current_line, 1, 8) = "str.get ") {
+            str1 := StringTrimLeft(current_line, 8)
+            str str_name := Trim(get_token(str1, ",", 1))
+            str index_source := Trim(get_token(str1, ",", 2))
+            str dest_reg_str := Trim(get_token(str1, ",", 3))
+            
+            int index := INT(get_value(index_source))
+            str content := get_value(str_name)
+            
+            str charr := SubStr(content, index + 1, 1)
+            set_value(dest_reg_str, charr)
+        }
+
+if (SubStr(current_line, 1, 8) = "str.set ") {
+    str1 := StringTrimLeft(current_line, 8)
+
+    str str_name := Trim(get_token(str1, ",", 1))
+    str index_source := Trim(get_token(str1, ",", 2))
+    str char_source := Trim(get_token(str1, ",", 3))
+
+    int index := INT(get_value(index_source))
+    str new_val := get_value(char_source)
+    str old_str := get_value(str_name)
+
+    ; --- HARD RULE: overwrite ONE character only ---
+    str repl_char := SubStr(new_val, 1, 1)   ; key fix
+    
+    str part1 := ""
+
+    if (index > 0) {
+        part1 := SubStr(old_str, 1, index)
+    }
+
+    str part2 := SubStr(old_str, index + 2)
+
+    str new_str := part1 . repl_char . part2
+    set_value(str_name, new_str)
+}
+
+        
+        if (SubStr(current_line, 1, 8) = "str.len ") {
+            str1 := StringTrimLeft(current_line, 8)
+            str str_name := Trim(get_token(str1, ",", 1))
+            str dest_reg_str := Trim(get_token(str1, ",", 2))
+            str content := get_value(str_name)
+            int len := StrLen(content)
+            set_value(dest_reg_str, STR(len))
+        }
+
+        if (!pc_was_modified) {
+            pc++
+        }
+    }
+    
+    Official_Oryx_VM_API_symbol_table_cache := Official_Oryx_VM_symbol_table
+
+    
+    return outState
+}
+
+
+func str Oryx_VM(str code) {
+    str outState := ""
+    code := Trim(code)
+    code := cleanUpFirst(code)
+    code := handleComments(code, "#")
+    code := handleComments(code, ";")
+    outState := Oryx_interpreter(Trim(code))
+    
+    return outState
+}
+
+main
+    
+    
+    
+    str code := ""
+    str params := ""
+    str outState := ""
+
+if (HTVM_getLang_HTVM() = "js") or (HTVM_getLang_HTVM() = "ts") {
+
+    code := mls
+
+string var1: `"hello`"
+string var2: `"hello`"
+
+cmp `"hello`", `"hello`" 
+je iter_end
+mov r1, 6
+call print
+iter_end:
+mov r1, 5
+call print              ; prints the complete greeting
+
+    mle
+
+    outState := Oryx_VM(code)
+    print(outState)
+
+}
+else {
+    params := getLangParams("oryxir", "oryxir")
+    if (params != "") {
+        code := FileRead(params)
+        outState := Oryx_VM(code)
+        print(outState)
+
+
+    }
+}
+
