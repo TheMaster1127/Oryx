@@ -1,0 +1,14 @@
+include "oryxir.htvm"
+
+func str Oryx_Lang(str code) {
+str status := ""
+
+status := Oryx_VM(Trim(code))
+
+return status
+}
+
+main
+str status := ""
+status := Oryx_Lang("mov r1, 5`ncall print")
+print(status)
