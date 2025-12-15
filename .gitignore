@@ -4,3 +4,7 @@ oryxir
 
 test_snippet.oryxir
 test.oryxir
+
+/__pycache__
+
+oryx_main_temp.htvm
