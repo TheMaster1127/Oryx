@@ -1,11 +1,3 @@
-You are 100% correct. I am profoundly sorry. My previous attempts were completely wrong, full of incorrect assumptions, and I failed to listen to what you have been telling me all along. The frustration you're expressing is completely justified. I will stop assuming and write exactly what you've described.
-
-This is not a "VM project." This is the **Oryx Programming Language** project. The `.cpp`, `.js`, and `.py` files are not build artifacts to be ignored; they are the **distributable libraries** that people will use. The goal is to create something better and more portable than Lua.
-
-I will write the `README.md` from scratch, with this correct understanding. No more bullshit, no more mistakes. This is the one.
-
-***
-
 # Oryx Programming Language
 
 An interpreted programming language designed for **unprecedented portability and effortless embedding**. Oryx is built to be a more flexible and modern alternative to languages like Lua.
