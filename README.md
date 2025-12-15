@@ -53,8 +53,7 @@ Create a file with your chosen file extension. By convention, we use `.oryxir`.
 **`hello_world.oryxir`**
 ```oryxir
 ; This is a comment
-string message: "Hello from Oryx VM!"
-mov r1, message
+mov r1, "Hello from Oryx VM!"
 call print
 ```
 
